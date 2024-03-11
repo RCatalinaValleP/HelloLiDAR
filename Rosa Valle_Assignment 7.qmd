@@ -1,0 +1,239 @@
+---
+title: "Assignment 7 - Rosa Catalina Valle"
+format: html
+editor: visual
+---
+
+## Ecologica Modelling, Assignment 7: LiDAR
+
+Becoming familiar with the lidR package as well as the general workflow for working with LiDAR data.
+
+## Part 1
+
+Loading necessary libraries
+
+```{r}
+# Loading necessary libraries
+
+library(units)
+library(lidR)
+library(terra)
+library(mapview)
+library(RCSF)
+library(tidyverse)
+
+```
+
+1.  Download the .LAS file from Moodle with your name on it.
+    -   a\. How many points are in your LAS file? Provide a line of code to determine this.
+    -   b\. What is the maximum elevation within your point cloud? Provide a line of code to determine this.
+
+```{r}
+las_rv <- readLAS("Rosa Valle.las")
+View(las_rv)
+plot(las_rv)
+las_rv
+
+num_points <- nrow(las_rv)
+max_elev <- max(las_rv$Z)
+
+cat("1.a Number ofpoints:", num_points,"\r\n")
+cat("1.b Max elevation:", max_elev,"\r\n")
+```
+
+2.  This question will get you producing various DEM’s:
+    -   a\. Classify ground points using the cloth simulated function (CSF) algorithm and produce a DEM using the triangular irregular network (TIN) algorithm.
+
+```{r}
+las_ground_rv <- classify_ground(las_rv, algorithm = csf())
+dem_CSF_TIN <- rasterize_terrain(las_ground_rv, res = 1, algorithm = tin())
+
+plot_dtm3d(dem_CSF_TIN, bg="white")
+```
+
+-   b\. Classify ground points using a progressive morphological filter (PMF) algorithm and produce a DEM using the TIN algorithm.
+
+```{r}
+las_ground_rv <- classify_ground(las_rv, algorithm = pmf(ws = 5, th = 3))
+dem_PMF_TIN <- rasterize_terrain(las_ground_rv, res = 1, algorithm = tin())
+plot_dtm3d(dem_PMF_TIN, bg="white")
+```
+
+-   c\. Classify ground points using the CSF algorithm and produce a DEM using the inverse distance weighting algorithm.
+
+```{r}
+las_ground_rv <- classify_ground(las_rv, algorithm = csf())
+dem_CSF_IDW <- rasterize_terrain(las_ground_rv, res = 1, algorithm = knnidw(k = 10L, p = 2))
+plot_dtm3d(dem_CSF_IDW)
+```
+
+-   d\. Briefly describe how the PMF algorithm works.
+
+R:
+
+The main steps of PMF algorithm are:
+
+-   Open the cloud point
+
+-   Compare and remove points based on a threshold; it is the threshold size or sequence of threshold heights, which default value is 3 (according [Zhang et al. (2003)](https://ieeexplore.ieee.org/document/1202973))
+
+-   Open the point cloud with a bigger winows: it requires the parameter ws or window size; it is the sequence of windows size, which default value is 5 (according [Zhang et al. (2003)](https://ieeexplore.ieee.org/document/1202973))
+
+-   Compare and remove points based on a threshold again, in a new iteration.
+
+3.  This question gets you producing some canopy height models (CHM’s):
+    -   a\. Normalize the point cloud using the inverse distance weighting algorithm, and then produce a CHM using the point-to-raster algorithm.
+
+```{r}
+las_ground_rv <- classify_ground(las_rv, algorithm = csf())
+gnd_rv <- filter_ground(las_ground_rv)
+plot(gnd_rv)
+
+las_norm_rv <- normalize_height(las_ground_rv, algorithm = knnidw())
+gnd_norm_rv <- filter_ground(las_norm_rv)
+plot(gnd_norm_rv)
+plot (las_norm_rv)
+
+chm_rv <- rasterize_canopy(las_norm_rv, res = 1, algorithm = p2r())
+plot_dtm3d(chm_rv)
+chm_rv
+```
+
+-   b\. Normalize the point cloud using the TIN algorithm and then produce a CHM using the TIN algorithm as well (i.e.: the “dsmtin” algorithm).
+
+```{r}
+las_norm_rv_TIN <- normalize_height(las_ground_rv, algorithm = tin())
+gnd_norm_rv_TIN <- filter_ground(las_norm_rv_TIN)
+plot(gnd_norm_rv_TIN)
+plot (las_norm_rv_TIN)
+
+chm_rv_TIN <- rasterize_canopy(las_norm_rv_TIN, res = 1, algorithm = dsmtin())
+plot_dtm3d(chm_rv_TIN)
+chm_rv_TIN
+```
+
+-   c\. Normalize the point cloud using the TIN algorithm, and then produce a CHM using the point-to-raster algorithm.
+
+```{r}
+plot(gnd_norm_rv_TIN)
+plot (las_norm_rv_TIN)
+
+chm_rv_P2R <- rasterize_canopy(las_norm_rv_TIN, res = 1, algorithm = p2r())
+plot_dtm3d(chm_rv_P2R)
+chm_rv_P2R
+```
+
+-   d\. Briefly describe how the inverse distance weighting algorithm works.
+
+IDW algorithm is based on the assumption that "the value at an unsampled point can be approximated as a **weighted** average of values at points within a certain cut-off distance *d*, or from a given number *k* of closest neighbours. Weights are **usually inversely proportional** to a power *p* of the **distance** between the location and the neighbor".
+
+4.  Choose one of the three normalization/CHM combinations from question three to move forward with.
+    -   a\. Perform individual tree segmentation (ITS) of the normalized point cloud using the Dalponte 2016 algorithm.
+
+```{r}
+ttops_rv <- locate_trees(chm_rv_TIN, lmf(5))
+las_its_dalponte_rv <- segment_trees(las_norm_rv, dalponte2016(chm_rv_TIN, ttops_rv))
+plot(las_its_dalponte_rv, color="treeID", size=2)
+```
+
+-   b\. Perform ITS of the normalized point cloud using the Li et al. 2012 algorithm.
+
+```{r}
+las_its_li2012_rv <- segment_trees(las_norm_rv, li2012())
+plot(las_its_li2012_rv, color="treeID", size=2)
+```
+
+-   c\. Perform ITS of the normalized point cloud using the Silva 2016 algorithm.
+
+```{r}
+las_its_silva_rv <- segment_trees(las_norm_rv, silva2016(chm_rv_TIN, ttops_rv))
+plot(las_its_silva_rv, color="treeID", size=2)
+```
+
+-   d\. Briefly describe how the Silva 2016 algorithm works.
+
+Silvia is a simple method based on seed + voronoi tesselation (equivalent to nearest neighbour). Unlike li2012, uses a CHM and the tops of the threes as arguments.
+
+5.  Retrieve the crown metrics for each of the tree segmented point clouds produced in number 4. How many trees were identified in each algorithm? What is the overall tree density in each of the segmented point clouds?
+
+```{r}
+metrics_dalponte <- crown_metrics(las_its_dalponte_rv, .stdtreemetrics, geom = "concave")
+mapview(metrics_dalponte, zcol = "treeID")
+ntrees_dalponte <- nrow(metrics_dalponte)
+
+metrics_li2012 <- crown_metrics(las_its_li2012_rv, .stdtreemetrics, geom = "concave")
+mapview(metrics_li2012, zcol = "treeID")
+ntrees_li2012 <- nrow(metrics_li2012)
+
+metrics_silva <- crown_metrics(las_its_silva_rv, .stdtreemetrics, geom = "concave")
+mapview(metrics_silva, zcol = "treeID")
+ntrees_silva <- nrow(metrics_silva)
+
+cat("Number of trees in dalponte:", ntrees_dalponte,"\r\n")
+cat("Number of trees in li2012:", ntrees_li2012,"\r\n")
+cat("Number of trees in dalponte:", ntrees_silva,"\r\n")
+```
+
+The overall tree density in each of the segmented point clouds?
+
+```{r}
+st_area(las_its_dalponte_rv)
+pc_area_dp <- set_units(st_area(las_its_dalponte_rv), "ha")
+round(ntrees_dalponte / pc_area_dp)
+
+st_area(las_its_li2012_rv)
+pc_area_li <- set_units(st_area(las_its_li2012_rv), "ha")
+round(ntrees_li2012 / pc_area_li)
+
+st_area(las_its_silva_rv)
+pc_area_sil <- set_units(st_area(las_its_silva_rv), "ha")
+round(ntrees_silva / pc_area_sil)
+```
+
+## Part 2
+
+1.  Isolate the tallest tree in one of the segmented point clouds. How many points are there that make up this particular tree?
+
+```{r}
+tall_tree_rv <- max(metrics_dalponte$Z)
+
+tall_tree_f <- metrics_dalponte %>% 
+  filter(Z == tall_tree_rv)
+
+cat("Number of points in the tallest tree",tall_tree_f$npoints,"\r\n" )
+```
+
+2.  What is the crown area of the tallest tree? What about the crown area of the shortest tree?
+
+```{r}
+
+# For the tallest tree
+las_tree_filter_tall <- filter_poi(las_its_dalponte_rv, treeID %in% tall_tree_f$treeID)
+
+metrics_tallest_tree <- crown_metrics(las_tree_filter_tall, .stdtreemetrics, geom = "concave")
+
+cat("Crown area of the tallest tree: ",metrics_tallest_tree$convhull_area,"\r\n" )
+
+# For the shortest tree
+short_tree_rv <- min(metrics_dalponte$Z)
+
+short_tree_f <- metrics_dalponte %>% 
+  filter(Z == short_tree_rv)
+
+las_tree_filter_short <- filter_poi(las_its_dalponte_rv, treeID %in% short_tree_f$treeID)
+
+metrics_shortest_tree <- crown_metrics(las_tree_filter_short, .stdtreemetrics, geom = "concave")
+
+cat("Crown area of the shortest tree: ",metrics_shortest_tree$convhull_area,"\r\n" )
+
+```
+
+3.  Plot this point cloud coloring the points by their treeID.
+
+```{r}
+plot(las_its_dalponte_rv, color = "treeID", size=5)
+plot(las_tree_filter_tall, color = "treeID", size=5)
+plot(las_tree_filter_short, color = "treeID", size=5)
+```
+
+End of the assignment
